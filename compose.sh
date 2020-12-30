@@ -150,6 +150,12 @@ up() {
         echo "" >&2
         echo "waiting for coredns to be ready" >&2
         wait_deployment "300" "kube-system" "coredns"
+        
+        # apply seed data
+        echo "" >&2
+        echo "applying seed resources" >&2
+        docker exec ksfs-k3d \
+            kubectl apply -f /seed/
 
         echo "" >&2
         echo "first-run actions complete" >&2

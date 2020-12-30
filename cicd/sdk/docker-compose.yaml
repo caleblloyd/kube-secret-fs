@@ -3,7 +3,7 @@ version: "3.5"
 services:
 
   k3d:
-    image: rancher/k3s:v1.17.2-k3s1
+    image: rancher/k3s:v1.20.0-k3s2
     container_name: ksfs-k3d
     hostname: k3d
     privileged: true
@@ -19,6 +19,7 @@ services:
     - "${K3D_PORT:-6443}:6443"
     volumes:
     - ./k3d.resolv.conf:/etc/resolv.conf:ro
+    - ./seed:/seed:ro
     - kube-sa:/var/run/secrets/kubernetes.io/serviceaccount
 
   dotnet:
@@ -32,16 +33,19 @@ services:
       - /dev/fuse
     security_opt:
       - apparmor:unconfined
+    environment:
+      KUBERNETES_SERVICE_HOST: "${KUBERNETES_SERVICE_HOST:-k3d}"
+      KUBERNETES_SERVICE_PORT: "${KUBERNETES_SERVICE_PORT:-6443}"
     working_dir: /app
     command:
       - sh
       - -c
       - |
         mkdir -p /mnt/ksfs /mnt/redir
-        dotnet watch run -- /mnt/ksfs /mnt/redir
+        dotnet watch run -- -o auto_unmount /mnt/ksfs /mnt/redir
     volumes:
-    - ../../KubeSecretFS.csproj:/app/KubeSecretFS.csproj
-    - ../../src:/app/src
+    - ../../KubeSecretFS.csproj:/app/KubeSecretFS.csproj:ro
+    - ../../src:/app/src:ro
     - kube-sa:/var/run/secrets/kubernetes.io/serviceaccount:ro
 
 volumes:

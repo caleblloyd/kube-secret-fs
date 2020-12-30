@@ -1,7 +1,11 @@
+// adapted from the following files:
+// https://github.com/alhimik45/Mono.Fuse.NETStandard/blob/master/example/RedirectFS-FH/RedirectFS-FH.cs
+// https://github.com/jonpryor/mono-fuse/blob/master/example/RedirectFS/RedirectFS-FH.cs
+// https://github.com/libfuse/libfuse/blob/fuse_2_9_5/example/fusexmp.c
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Text;
 using Mono.Fuse.NETStandard;
 using Mono.Unix.Native;
@@ -286,7 +290,7 @@ namespace KubeSecretFS
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
-        private bool ParseArguments(string[] args)
+        public bool ParseArguments(string[] args)
         {
             foreach (var t in args)
                 switch (t)
@@ -323,33 +327,6 @@ namespace KubeSecretFS
         {
             Console.Error.WriteLine("kube-secret-fs: error: {0}", message);
             return false;
-        }
-
-        public static void Main(string[] args)
-        {
-            var processStartInfo = new ProcessStartInfo
-            {
-                FileName = "tar",
-                Arguments = "--help",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            };
-            var process = Process.Start(processStartInfo);
-            if (process != null)
-            {
-                var stdout = process.StandardOutput.ReadToEnd();
-                var stderr = process.StandardError.ReadToEnd();
-                process.WaitForExit();
-                // Console.WriteLine(stdout);
-                // Console.WriteLine(stderr);
-            }
-
-            using var fs = new KubeSecretFS();
-            var unhandled = fs.ParseFuseArguments(args);
-            if (!fs.ParseArguments(unhandled))
-                return;
-            fs.Start();
         }
     }
 }

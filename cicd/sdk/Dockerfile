@@ -1,3 +1,5 @@
+FROM boxboat/kubectl:1.20.0 AS kubectl
+
 # dotnet-sdk base image
 FROM mcr.microsoft.com/dotnet/sdk:5.0-buster-slim AS sdk
 
@@ -9,3 +11,5 @@ RUN apt update \
         libglib2.0-0 \
         procps \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=kubectl /usr/local/bin/kubectl /usr/local/bin/kubectl
