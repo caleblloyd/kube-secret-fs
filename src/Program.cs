@@ -14,38 +14,25 @@ namespace KubeSecretFS
         private static IHostBuilder CreateHostBuilder() =>
             Host.CreateDefaultBuilder()
                 .ConfigureServices((_, services) =>
+                {
+                    var kubeClientConfig = KubernetesClientConfiguration.InClusterConfig();
+                    var kubeClient = new Kubernetes(kubeClientConfig);
                     services
                         .AddSingleton<AppConfig>()
                         .AddSingleton<KubeSecretFS>()
-                        .AddSingleton(new Kubernetes(KubernetesClientConfiguration.InClusterConfig()))
-                );
+                        .AddSingleton(kubeClientConfig)
+                        .AddSingleton(kubeClient)
+                        .AddSingleton<Sync>();
+                });
 
 
         public static async Task<int> Main(string[] args)
         {
-            await Task.Delay(1);
-            var processStartInfo = new ProcessStartInfo
-            {
-                FileName = "tar",
-                Arguments = "--help",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            };
-            var process = Process.Start(processStartInfo);
-            if (process != null)
-            {
-                var stdout = process.StandardOutput.ReadToEnd();
-                var stderr = process.StandardError.ReadToEnd();
-                await process.WaitForExitAsync();
-                // Console.WriteLine(stdout);
-                // Console.WriteLine(stderr);
-            }
-
             using var host = CreateHostBuilder().Build();
             using var scope = host.Services.CreateScope();
             var config = scope.ServiceProvider.GetRequiredService<AppConfig>();
             var fs = scope.ServiceProvider.GetRequiredService<KubeSecretFS>();
+            var sync = scope.ServiceProvider.GetRequiredService<Sync>();
 
             var unhandled = fs.ParseFuseArguments(args);
             switch (config.ParseArguments(unhandled))
@@ -59,6 +46,8 @@ namespace KubeSecretFS
             }
 
             fs.MountPoint = config.MountPoint;
+
+            await sync.InitAsync();
 
             AppDomain.CurrentDomain.ProcessExit += (_, _) =>
             {

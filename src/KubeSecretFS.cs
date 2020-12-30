@@ -11,13 +11,15 @@ using Mono.Unix.Native;
 
 namespace KubeSecretFS
 {
-    internal class KubeSecretFS : FileSystem
+    public class KubeSecretFS : FileSystem
     {
         private readonly AppConfig _config;
-        
-        public KubeSecretFS(AppConfig config)
+        private readonly Sync _sync;
+
+        public KubeSecretFS(AppConfig config, Sync sync)
         {
             _config = config;
+            _sync = sync;
         }
 
         protected override Errno OnGetPathStatus(string path, out Stat buf)
@@ -106,7 +108,7 @@ namespace KubeSecretFS
             if ((mode & FilePermissions.S_IFMT) == FilePermissions.S_IFREG)
             {
                 r = Syscall.open(_config.BaseDir + path, OpenFlags.O_CREAT | OpenFlags.O_EXCL |
-                                                  OpenFlags.O_WRONLY, mode);
+                                                         OpenFlags.O_WRONLY, mode);
                 if (r >= 0)
                     r = Syscall.close(r);
             }
@@ -119,75 +121,73 @@ namespace KubeSecretFS
                 r = Syscall.mknod(_config.BaseDir + path, mode, rdev);
             }
 
-            return r == -1 ? Stdlib.GetLastError() : 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnCreateDirectory(string path, FilePermissions mode)
         {
             var r = Syscall.mkdir(_config.BaseDir + path, mode);
-            return r == -1 ? Stdlib.GetLastError() : 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnRemoveFile(string path)
         {
             var r = Syscall.unlink(_config.BaseDir + path);
-            return r == -1 ? Stdlib.GetLastError() : 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnRemoveDirectory(string path)
         {
             var r = Syscall.rmdir(_config.BaseDir + path);
-            return r == -1 ? Stdlib.GetLastError() : 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnCreateSymbolicLink(string from, string to)
         {
             var r = Syscall.symlink(from, _config.BaseDir + to);
-            return r == -1 ? Stdlib.GetLastError() : 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnRenamePath(string from, string to)
         {
             var r = Stdlib.rename(_config.BaseDir + from, _config.BaseDir + to);
-            return r == -1 ? Stdlib.GetLastError() : 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnCreateHardLink(string from, string to)
         {
             var r = Syscall.link(_config.BaseDir + from, _config.BaseDir + to);
-            if (r == -1)
-                return Stdlib.GetLastError();
-            return 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnChangePathPermissions(string path, FilePermissions mode)
         {
             var r = Syscall.chmod(_config.BaseDir + path, mode);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnChangePathOwner(string path, long uid, long gid)
         {
             var r = Syscall.lchown(_config.BaseDir + path, (uint) uid, (uint) gid);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnTruncateFile(string path, long size)
         {
             var r = Syscall.truncate(_config.BaseDir + path, size);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnTruncateHandle(string path, OpenedPathInfo info, long size)
         {
             var r = Syscall.ftruncate((int) info.Handle, size);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnChangePathTimes(string path, ref Utimbuf buf)
         {
             var r = Syscall.utime(_config.BaseDir + path, ref buf);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnCreateHandle(string path, OpenedPathInfo info, FilePermissions mode)
@@ -231,13 +231,13 @@ namespace KubeSecretFS
                     pb, (ulong) buf.Length, offset);
             }
 
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnGetFileSystemStatus(string path, out Statvfs stbuf)
         {
             var r = Syscall.statvfs(_config.BaseDir + path, out stbuf);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnFlushHandle(string path, OpenedPathInfo info)
@@ -254,44 +254,47 @@ namespace KubeSecretFS
         protected override Errno OnReleaseHandle(string path, OpenedPathInfo info)
         {
             var r = Syscall.close((int) info.Handle);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() :
+                info.OpenAccess.HasFlag(OpenFlags.O_WRONLY) ? _sync.WriteAsync().GetAwaiter().GetResult() : 0;
         }
 
         protected override Errno OnSynchronizeHandle(string path, OpenedPathInfo info, bool onlyUserData)
         {
             var r = onlyUserData ? Syscall.fdatasync((int) info.Handle) : Syscall.fsync((int) info.Handle);
-            return r == -1 ? Stdlib.GetLastError() : 0;
+            return r == -1 ? Stdlib.GetLastError() :
+                info.OpenAccess.HasFlag(OpenFlags.O_WRONLY) ? _sync.WriteAsync().GetAwaiter().GetResult() : 0;
         }
 
         protected override Errno OnSetPathExtendedAttribute(string path, string name, byte[] value, XattrFlags flags)
         {
             var r = Syscall.lsetxattr(_config.BaseDir + path, name, value, (ulong) value.Length, flags);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnGetPathExtendedAttribute(string path, string name, byte[] value,
             out int bytesWritten)
         {
-            var r = bytesWritten = (int) Syscall.lgetxattr(_config.BaseDir + path, name, value, (ulong) (value?.Length ?? 0));
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            var r = bytesWritten =
+                (int) Syscall.lgetxattr(_config.BaseDir + path, name, value, (ulong) (value?.Length ?? 0));
+            return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnListPathExtendedAttributes(string path, out string[] names)
         {
             var r = (int) Syscall.llistxattr(_config.BaseDir + path, out names);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnRemovePathExtendedAttribute(string path, string name)
         {
             var r = Syscall.lremovexattr(_config.BaseDir + path, name);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : _sync.WriteAsync().GetAwaiter().GetResult();
         }
 
         protected override Errno OnLockHandle(string file, OpenedPathInfo info, FcntlCommand cmd, ref Flock @lock)
         {
             var r = Syscall.fcntl((int) info.Handle, cmd, ref @lock);
-            return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
+            return r == -1 ? Stdlib.GetLastError() : 0;
         }
     }
 }

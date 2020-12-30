@@ -12,13 +12,10 @@ RUN dotnet publish -c Release -o /app
 FROM mcr.microsoft.com/dotnet/runtime-deps:5.0-buster-slim
 
 RUN apt update \
-    && apt install -y \
+    && apt install -y --no-install-recommends \
         fuse \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /mnt/test /mnt/redir
-WORKDIR /mnt/test
-
 COPY --from=sdk /app /app
-CMD ["/app/KubeSecretFS", "/mnt/test", "/mnt/redir"]
+CMD ["/app/KubeSecretFS"]

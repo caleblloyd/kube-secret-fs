@@ -156,6 +156,9 @@ up() {
         echo "applying seed resources" >&2
         docker exec ksfs-k3d \
             kubectl apply -f /seed/
+            
+        # sleep to allow rbac rules to update
+        sleep 2       
 
         echo "" >&2
         echo "first-run actions complete" >&2

@@ -10,10 +10,22 @@ namespace KubeSecretFS
     public class AppConfig
     {
         public string BaseDir { get; private set; }
-
         public bool Debug { get; private set; }
-
         public string MountPoint { get; private set; }
+        public string SecretBaseName { get; private set; }
+        public string SecretNamespace { get; private set; }
+
+        public int MaxBytesPerSecret { get; } = 524288;
+        public int MaxSecrets { get; } = 20;
+        public int KubeApiTimeoutSeconds { get; } = 5;
+
+        private static readonly string NamespacePath = Path.Combine(
+            $"{Path.DirectorySeparatorChar}var",
+            "run",
+            "secrets",
+            "kubernetes.io",
+            "serviceaccount",
+            "namespace");
 
         [SuppressMessage("ReSharper", "AssignmentInConditionalExpression")]
         public ParseResult ParseArguments(IEnumerable<string> args)
@@ -31,13 +43,25 @@ namespace KubeSecretFS
                 },
                 {
                     "baseDir=", "base dir used for filesystem caching             " +
-                                "env var KUBE_SECRET_FS_BASE_DIR                  " +
-                                "defaults to <temp dir>/kube-secret-fs",
+                                "defaults to <temp dir>/kube-secret-fs            " +
+                                "env var KUBE_SECRET_FS_BASE_DIR                  ",
                     v => BaseDir = v
                 },
                 {
                     "h|help", "show this message and exit",
                     v => showHelp = v != null
+                },
+                {
+                    "secretBaseName=", "kubernetes secret base name to store data in  " +
+                                       "env var KUBE_SECRET_FS_SECRET_BASE_NAME       " +
+                                       "defaults to 'kube-secret-fs'",
+                    v => SecretBaseName = v
+                },
+                {
+                    "secretNamespace=", "kubernetes secret namespace                   " +
+                                        "env var KUBE_SECRET_FS_SECRET_NAMESPACE       " +
+                                        "defaults to same namespace as pod",
+                    v => SecretNamespace = v
                 },
             };
 
@@ -62,6 +86,8 @@ namespace KubeSecretFS
                     || Environment.GetEnvironmentVariable("KUBE_SECRET_FS_DEBUG") == "1"
                     || Environment.GetEnvironmentVariable("KUBE_SECRET_FS_DEBUG") == "true";
             MountPoint = Environment.GetEnvironmentVariable("KUBE_SECRET_FS_MOUNT_POINT") ?? MountPoint;
+            SecretBaseName = Environment.GetEnvironmentVariable("KUBE_SECRET_FS_SECRET_BASE_NAME") ?? SecretBaseName;
+            SecretNamespace = Environment.GetEnvironmentVariable("KUBE_SECRET_FS_SECRET_NAMESPACE") ?? SecretNamespace;
 
             // Set Defaults
             if (BaseDir == null)
@@ -70,11 +96,23 @@ namespace KubeSecretFS
                 Directory.CreateDirectory(BaseDir!);
             }
 
-            if (error |= MountPoint == null) WriteError("missing mountPoint arg");
-            
+            SecretBaseName ??= "kube-secret-fs";
+
+            if (SecretNamespace == null && File.Exists(NamespacePath))
+                SecretNamespace = File.ReadAllText(NamespacePath, Utils.Utf8EncodingNoBom).Trim();
+
+            // Error Checking
+            if (error |= MountPoint == null)
+                WriteError("missing mountPoint arg");
+
+            if (error |= SecretNamespace == null)
+                WriteError("unable to determine default for --secretNamespace; must be set explicitly");
+
             WriteDebug($"Options:");
             WriteDebug($"BaseDir: {BaseDir}");
             WriteDebug($"MountPoint: {MountPoint}");
+            WriteDebug($"SecretBaseName: {SecretBaseName}");
+            WriteDebug($"SecretNamespace: {SecretNamespace}");
 
             return error ? ParseResult.Error : ParseResult.Valid;
         }
@@ -92,12 +130,12 @@ namespace KubeSecretFS
             p.WriteOptionDescriptions(Console.Error);
         }
 
-        private static void WriteError(string message)
+        public void WriteError(string message)
         {
             Console.Error.WriteLine("kube-secret-fs: error: {0}", message);
         }
 
-        private static void WriteWarning(string message)
+        public void WriteWarning(string message)
         {
             Console.Error.WriteLine("kube-secret-fs: warning: {0}", message);
         }
