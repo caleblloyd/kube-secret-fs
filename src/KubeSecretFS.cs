@@ -5,7 +5,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Text;
 using Mono.Fuse.NETStandard;
 using Mono.Unix.Native;
@@ -14,11 +13,16 @@ namespace KubeSecretFS
 {
     internal class KubeSecretFS : FileSystem
     {
-        private string _basedir;
+        private readonly AppConfig _config;
+        
+        public KubeSecretFS(AppConfig config)
+        {
+            _config = config;
+        }
 
         protected override Errno OnGetPathStatus(string path, out Stat buf)
         {
-            var r = Syscall.lstat(_basedir + path, out buf);
+            var r = Syscall.lstat(_config.BaseDir + path, out buf);
             return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
@@ -30,7 +34,7 @@ namespace KubeSecretFS
 
         protected override Errno OnAccessPath(string path, AccessModes mask)
         {
-            var r = Syscall.access(_basedir + path, mask);
+            var r = Syscall.access(_config.BaseDir + path, mask);
             return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
@@ -40,7 +44,7 @@ namespace KubeSecretFS
             var buf = new StringBuilder(256);
             do
             {
-                var r = Syscall.readlink(_basedir + path, buf);
+                var r = Syscall.readlink(_config.BaseDir + path, buf);
                 if (r < 0) return Stdlib.GetLastError();
 
                 if (r == buf.Capacity)
@@ -57,7 +61,7 @@ namespace KubeSecretFS
 
         protected override Errno OnOpenDirectory(string path, OpenedPathInfo info)
         {
-            var dp = Syscall.opendir(_basedir + path);
+            var dp = Syscall.opendir(_config.BaseDir + path);
             if (dp == IntPtr.Zero)
                 return Stdlib.GetLastError();
 
@@ -101,18 +105,18 @@ namespace KubeSecretFS
             // this is more portable.
             if ((mode & FilePermissions.S_IFMT) == FilePermissions.S_IFREG)
             {
-                r = Syscall.open(_basedir + path, OpenFlags.O_CREAT | OpenFlags.O_EXCL |
+                r = Syscall.open(_config.BaseDir + path, OpenFlags.O_CREAT | OpenFlags.O_EXCL |
                                                   OpenFlags.O_WRONLY, mode);
                 if (r >= 0)
                     r = Syscall.close(r);
             }
             else if ((mode & FilePermissions.S_IFMT) == FilePermissions.S_IFIFO)
             {
-                r = Syscall.mkfifo(_basedir + path, mode);
+                r = Syscall.mkfifo(_config.BaseDir + path, mode);
             }
             else
             {
-                r = Syscall.mknod(_basedir + path, mode, rdev);
+                r = Syscall.mknod(_config.BaseDir + path, mode, rdev);
             }
 
             return r == -1 ? Stdlib.GetLastError() : 0;
@@ -120,37 +124,37 @@ namespace KubeSecretFS
 
         protected override Errno OnCreateDirectory(string path, FilePermissions mode)
         {
-            var r = Syscall.mkdir(_basedir + path, mode);
+            var r = Syscall.mkdir(_config.BaseDir + path, mode);
             return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnRemoveFile(string path)
         {
-            var r = Syscall.unlink(_basedir + path);
+            var r = Syscall.unlink(_config.BaseDir + path);
             return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnRemoveDirectory(string path)
         {
-            var r = Syscall.rmdir(_basedir + path);
+            var r = Syscall.rmdir(_config.BaseDir + path);
             return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnCreateSymbolicLink(string from, string to)
         {
-            var r = Syscall.symlink(from, _basedir + to);
+            var r = Syscall.symlink(from, _config.BaseDir + to);
             return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnRenamePath(string from, string to)
         {
-            var r = Stdlib.rename(_basedir + from, _basedir + to);
+            var r = Stdlib.rename(_config.BaseDir + from, _config.BaseDir + to);
             return r == -1 ? Stdlib.GetLastError() : 0;
         }
 
         protected override Errno OnCreateHardLink(string from, string to)
         {
-            var r = Syscall.link(_basedir + from, _basedir + to);
+            var r = Syscall.link(_config.BaseDir + from, _config.BaseDir + to);
             if (r == -1)
                 return Stdlib.GetLastError();
             return 0;
@@ -158,19 +162,19 @@ namespace KubeSecretFS
 
         protected override Errno OnChangePathPermissions(string path, FilePermissions mode)
         {
-            var r = Syscall.chmod(_basedir + path, mode);
+            var r = Syscall.chmod(_config.BaseDir + path, mode);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
         protected override Errno OnChangePathOwner(string path, long uid, long gid)
         {
-            var r = Syscall.lchown(_basedir + path, (uint) uid, (uint) gid);
+            var r = Syscall.lchown(_config.BaseDir + path, (uint) uid, (uint) gid);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
         protected override Errno OnTruncateFile(string path, long size)
         {
-            var r = Syscall.truncate(_basedir + path, size);
+            var r = Syscall.truncate(_config.BaseDir + path, size);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
@@ -182,13 +186,13 @@ namespace KubeSecretFS
 
         protected override Errno OnChangePathTimes(string path, ref Utimbuf buf)
         {
-            var r = Syscall.utime(_basedir + path, ref buf);
+            var r = Syscall.utime(_config.BaseDir + path, ref buf);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
         protected override Errno OnCreateHandle(string path, OpenedPathInfo info, FilePermissions mode)
         {
-            var fd = Syscall.open(_basedir + path, info.OpenFlags, mode);
+            var fd = Syscall.open(_config.BaseDir + path, info.OpenFlags, mode);
             if (fd == -1)
                 return Stdlib.GetLastError();
             info.Handle = (IntPtr) fd;
@@ -197,7 +201,7 @@ namespace KubeSecretFS
 
         protected override Errno OnOpenHandle(string path, OpenedPathInfo info)
         {
-            var fd = Syscall.open(_basedir + path, info.OpenFlags);
+            var fd = Syscall.open(_config.BaseDir + path, info.OpenFlags);
             if (fd == -1)
                 return Stdlib.GetLastError();
             info.Handle = (IntPtr) fd;
@@ -232,7 +236,7 @@ namespace KubeSecretFS
 
         protected override Errno OnGetFileSystemStatus(string path, out Statvfs stbuf)
         {
-            var r = Syscall.statvfs(_basedir + path, out stbuf);
+            var r = Syscall.statvfs(_config.BaseDir + path, out stbuf);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
@@ -261,26 +265,26 @@ namespace KubeSecretFS
 
         protected override Errno OnSetPathExtendedAttribute(string path, string name, byte[] value, XattrFlags flags)
         {
-            var r = Syscall.lsetxattr(_basedir + path, name, value, (ulong) value.Length, flags);
+            var r = Syscall.lsetxattr(_config.BaseDir + path, name, value, (ulong) value.Length, flags);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
         protected override Errno OnGetPathExtendedAttribute(string path, string name, byte[] value,
             out int bytesWritten)
         {
-            var r = bytesWritten = (int) Syscall.lgetxattr(_basedir + path, name, value, (ulong) (value?.Length ?? 0));
+            var r = bytesWritten = (int) Syscall.lgetxattr(_config.BaseDir + path, name, value, (ulong) (value?.Length ?? 0));
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
         protected override Errno OnListPathExtendedAttributes(string path, out string[] names)
         {
-            var r = (int) Syscall.llistxattr(_basedir + path, out names);
+            var r = (int) Syscall.llistxattr(_config.BaseDir + path, out names);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
         protected override Errno OnRemovePathExtendedAttribute(string path, string name)
         {
-            var r = Syscall.lremovexattr(_basedir + path, name);
+            var r = Syscall.lremovexattr(_config.BaseDir + path, name);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
         }
 
@@ -288,45 +292,6 @@ namespace KubeSecretFS
         {
             var r = Syscall.fcntl((int) info.Handle, cmd, ref @lock);
             return r == -1 ? Stdlib.GetLastError() : (Errno) 0;
-        }
-
-        public bool ParseArguments(string[] args)
-        {
-            foreach (var t in args)
-                switch (t)
-                {
-                    case "-h":
-                    case "--help":
-                        ShowHelp();
-                        return false;
-                    default:
-                        if (MountPoint == null)
-                            MountPoint = t;
-                        else
-                            _basedir = t;
-                        break;
-                }
-
-            if (MountPoint == null) return Error("missing mountpoint");
-
-            if (_basedir == null) return Error("missing basedir");
-
-            return true;
-        }
-
-        private static void ShowHelp()
-        {
-            Console.Error.WriteLine("usage: kube-secret-fs [options] mountpoint:");
-            ShowFuseHelp("kube-secret-fs");
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("kube-secret-fs options");
-            Console.Error.WriteLine("    basedir                Directory to mirror");
-        }
-
-        private static bool Error(string message)
-        {
-            Console.Error.WriteLine("kube-secret-fs: error: {0}", message);
-            return false;
         }
     }
 }

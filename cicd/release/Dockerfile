@@ -6,7 +6,7 @@ WORKDIR /build
 RUN dotnet restore
 
 COPY / /build
-RUN dotnet publish -o /app
+RUN dotnet publish -c Release -o /app
 
 # final image
 FROM mcr.microsoft.com/dotnet/runtime-deps:5.0-buster-slim

@@ -2,13 +2,28 @@ using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using k8s;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Mono.Fuse.NETStandard;
 
 namespace KubeSecretFS
 {
     public static class Program
     {
-        public static Task Main(string[] args)
+        private static IHostBuilder CreateHostBuilder() =>
+            Host.CreateDefaultBuilder()
+                .ConfigureServices((_, services) =>
+                    services
+                        .AddSingleton<AppConfig>()
+                        .AddSingleton<KubeSecretFS>()
+                        .AddSingleton(new Kubernetes(KubernetesClientConfiguration.InClusterConfig()))
+                );
+
+
+        public static async Task<int> Main(string[] args)
         {
+            await Task.Delay(1);
             var processStartInfo = new ProcessStartInfo
             {
                 FileName = "tar",
@@ -22,16 +37,29 @@ namespace KubeSecretFS
             {
                 var stdout = process.StandardOutput.ReadToEnd();
                 var stderr = process.StandardError.ReadToEnd();
-                process.WaitForExit();
+                await process.WaitForExitAsync();
                 // Console.WriteLine(stdout);
                 // Console.WriteLine(stderr);
             }
 
-            using var fs = new KubeSecretFS();
+            using var host = CreateHostBuilder().Build();
+            using var scope = host.Services.CreateScope();
+            var config = scope.ServiceProvider.GetRequiredService<AppConfig>();
+            var fs = scope.ServiceProvider.GetRequiredService<KubeSecretFS>();
+
             var unhandled = fs.ParseFuseArguments(args);
-            if (!fs.ParseArguments(unhandled))
-                return Task.CompletedTask;
-            
+            switch (config.ParseArguments(unhandled))
+            {
+                case ParseResult.Valid:
+                    break;
+                case ParseResult.Help:
+                    return 0;
+                case ParseResult.Error:
+                    return 1;
+            }
+
+            fs.MountPoint = config.MountPoint;
+
             AppDomain.CurrentDomain.ProcessExit += (_, _) =>
             {
                 // ReSharper disable once AccessToDisposedClosure
@@ -39,7 +67,7 @@ namespace KubeSecretFS
             };
 
             fs.Start();
-            return Task.CompletedTask;
+            return 0;
         }
     }
 }

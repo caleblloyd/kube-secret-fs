@@ -41,8 +41,7 @@ services:
       - sh
       - -c
       - |
-        mkdir -p /mnt/ksfs /mnt/redir
-        dotnet watch run -- -o auto_unmount /mnt/ksfs /mnt/redir
+        exec dotnet watch run -- -o auto_unmount --debug /mnt
     volumes:
     - ../../KubeSecretFS.csproj:/app/KubeSecretFS.csproj:ro
     - ../../src:/app/src:ro
