@@ -1,0 +1,31 @@
+version: "3.7"
+
+services:
+
+  dotnet:
+    build:
+      context: ../../
+      dockerfile: cicd/release/Dockerfile
+    container_name: ksfs-dotnet
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      KUBERNETES_SERVICE_HOST: "${KUBERNETES_SERVICE_HOST:-k3d}"
+      KUBERNETES_SERVICE_PORT: "${KUBERNETES_SERVICE_PORT:-6443}"
+      KUBE_SECRET_FS_DEBUG: "true"
+      KUBE_SECRET_FS_MOUNT_POINT: "/mnt"
+    command:
+      - sh
+      - -c
+      - |
+        echo "waiting for Service Account token to be written" >&2
+        while ! [ -f "/var/run/secrets/kubernetes.io/serviceaccount/token" ]; do sleep 0.1; done
+        echo "Service Account token written" >&2
+        exec "/app/KubeSecretFS"
+    volumes:
+    - ../sdk/test:/test:ro
+    - kube-sa:/var/run/secrets/kubernetes.io/serviceaccount:ro

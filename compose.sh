@@ -7,7 +7,12 @@ logs="false"
 script="$0"
 
 docker_compose() {
-    docker-compose -f cicd/sdk/docker-compose.yaml -p ksfs "$@"
+    dotnet_compose="cicd/sdk/docker-compose-dotnet.yaml"
+    if [ "$CI_RELEASE" = "true" ]; then
+        dotnet_compose="cicd/release/docker-compose-dotnet.yaml"
+    fi
+    k3d_compose="cicd/sdk/docker-compose-k3d.yaml"
+    docker-compose -f "$k3d_compose" -f "$dotnet_compose" -p ksfs "$@"
 }
 
 wait_secret() {
@@ -128,7 +133,18 @@ up() {
         echo "" >&2
         echo "performing first-run actions" >&2
 
-        # copy service account token on first-run
+        # apply seed data
+        echo "" >&2
+        echo "applying seed resources" >&2
+        docker exec ksfs-k3d \
+            kubectl apply -f /seed/
+
+        # wait for coredns to be ready
+        echo "" >&2
+        echo "waiting for coredns to be ready" >&2
+        wait_deployment "300" "kube-system" "coredns"
+
+        # copy service account token
         echo "" >&2
         echo "copying service account token" >&2
         docker exec ksfs-k3d sh -c '
@@ -149,20 +165,6 @@ up() {
                     | base64 -d \
                     > token
             '
-
-        # wait for coredns to be ready
-        echo "" >&2
-        echo "waiting for coredns to be ready" >&2
-        wait_deployment "300" "kube-system" "coredns"
-        
-        # apply seed data
-        echo "" >&2
-        echo "applying seed resources" >&2
-        docker exec ksfs-k3d \
-            kubectl apply -f /seed/
-            
-        # sleep to allow rbac rules to update
-        sleep 2       
 
         echo "" >&2
         echo "first-run actions complete" >&2
@@ -193,7 +195,15 @@ get_kubeconfig() {
     '
 }
 
-shell() {
+logs() {
+    docker_compose logs -f dotnet
+}
+
+shell_dotnet() {
+    docker exec -it ksfs-dotnet bash
+}
+
+shell_k3d() {
     docker exec -it ksfs-k3d sh
 }
 
@@ -205,10 +215,13 @@ manage local HobbyFarm development environment
         
 where <command> is one of:
 
-    up          - create or start k3d
-    stop        - stop k3d
-    destroy     - destroy k3d
-    shell       - drop a shell into k3d container
+    up           - create or start services
+    stop         - stop services
+    destroy      - destroy services
+    kubeconfig   - print k3d kubeconfig
+    logs         - tail dotnet container logs
+    shell-dotnet - drop a shell into dotnet container
+    shell-k3d    - drop a shell into k3d container
 
 options:
     -h, --help  - print this message
@@ -234,8 +247,14 @@ case "$1" in
     kubeconfig)
         get_kubeconfig
         ;;
-    shell)
-        shell
+    logs)
+        logs
+        ;;
+    shell-dotnet)
+        shell_dotnet
+        ;;
+    shell-k3d)
+        shell_k3d
         ;;
     *)
         usage

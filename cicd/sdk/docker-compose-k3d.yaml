@@ -1,0 +1,26 @@
+version: "3.7"
+
+services:
+
+  k3d:
+    image: rancher/k3s:v1.20.0-k3s2
+    container_name: ksfs-k3d
+    hostname: k3d
+    privileged: true
+    command:
+      - server
+      - --https-listen-port
+      - "6443"
+      - --no-deploy
+      - traefik
+    environment:
+      K3D_PORT: ${K3D_PORT:-6443}
+    ports:
+    - "${K3D_PORT:-6443}:6443"
+    volumes:
+    - ./k3d.resolv.conf:/etc/resolv.conf:ro
+    - ./seed:/seed:ro
+    - kube-sa:/var/run/secrets/kubernetes.io/serviceaccount
+
+volumes:
+  kube-sa: {}
