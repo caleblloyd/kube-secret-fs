@@ -17,15 +17,17 @@ namespace KubeSecretFS
         private const string Version = "0.1";
 
         private readonly AppConfig _config;
-        private readonly Kubernetes _kubeClient;
+        private readonly Logger _logger;
+        private readonly KubeAccessor _kubeAccessor;
         private bool _mdSecretExists;
-        private readonly SemaphoreSlim _semaphore = new(1);
         private readonly ConcurrentDictionary<string, string> _secretNameGenerationDict = new();
+        private readonly SemaphoreSlim _semaphore = new(1);
 
-        public Sync(AppConfig config, Kubernetes kubeClient)
+        public Sync(AppConfig config, KubeAccessor kubeAccessor, Logger logger)
         {
             _config = config;
-            _kubeClient = kubeClient;
+            _kubeAccessor = kubeAccessor;
+            _logger = logger;
         }
 
         public async Task InitAsync()
@@ -37,7 +39,7 @@ namespace KubeSecretFS
                 Utils.CleanFolder(_config.BaseDir);
 
                 var mdSecret = (
-                    await _kubeClient.ListNamespacedSecretAsync(
+                    await _kubeAccessor.Client.ListNamespacedSecretAsync(
                         _config.SecretNamespace,
                         fieldSelector: $"metadata.name={_config.SecretBaseName}",
                         cancellationToken: cts.Token)
@@ -48,24 +50,24 @@ namespace KubeSecretFS
 
                 if (mdSecret == default)
                 {
-                    _config.WriteDebug("metadata secret is empty");
+                    _logger.Debug("metadata secret is empty");
                 }
                 else
                 {
                     _mdSecretExists = true;
                     if (mdSecret.Metadata.Labels.TryGetValue("version", out mdVersion))
                     {
-                        _config.WriteDebug($"metadata secret version: {mdVersion}");
+                        _logger.Debug($"metadata secret version: {mdVersion}");
                     }
 
                     if (mdSecret.Metadata.Labels.TryGetValue("generation", out mdGeneration))
                     {
-                        _config.WriteDebug($"metadata secret generation: {mdGeneration}");
+                        _logger.Debug($"metadata secret generation: {mdGeneration}");
                     }
                 }
 
                 var sl = new SortedList<int, byte[]>();
-                var secrets = await _kubeClient.ListNamespacedSecretAsync(
+                var secrets = await _kubeAccessor.Client.ListNamespacedSecretAsync(
                     _config.SecretNamespace,
                     labelSelector: $"owner=kube-secret-fs,parent={_config.SecretBaseName}",
                     cancellationToken: cts.Token);
@@ -103,7 +105,6 @@ namespace KubeSecretFS
                         WorkingDirectory = _config.BaseDir
                     };
                     var process = Process.Start(processStartInfo);
-                    _config.WriteDebug("tar called");
                     // ReSharper disable once UseAwaitUsing
                     using (var stdinStream = process!.StandardInput.BaseStream)
                     {
@@ -114,11 +115,10 @@ namespace KubeSecretFS
                     }
 
                     await process.WaitForExitAsync(cts.Token);
-                    _config.WriteDebug("tar done");
                     if (process.ExitCode != 0)
                     {
                         var stderr = await process.StandardError.ReadToEndAsync();
-                        _config.WriteError($"tar error: {stderr}");
+                        _logger.Error($"tar error: {stderr}");
                     }
 
                     await CleanupOldSecrets(mdGeneration ?? "none", cts.Token);
@@ -130,13 +130,13 @@ namespace KubeSecretFS
             }
         }
 
-        public async Task<Errno> WriteAsync()
+        public async Task<Errno> WriteAsync(string debugInfo)
         {
-            _config.WriteDebug("sync called");
+            _logger.Debug($"{debugInfo} queued");
             await _semaphore.WaitAsync();
-            _config.WriteDebug("semaphore acquired");
             try
             {
+                _logger.Debug($"{debugInfo} running");
                 var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_config.KubeApiTimeoutSeconds));
                 var generation = Multibase.Encode(
                     MultibaseEncoding.Base32Lower,
@@ -155,7 +155,6 @@ namespace KubeSecretFS
                     WorkingDirectory = _config.BaseDir
                 };
                 var process = Process.Start(processStartInfo);
-                _config.WriteDebug("tar called");
                 var stdoutStream = process!.StandardOutput.BaseStream;
 
                 var i = 0;
@@ -163,10 +162,9 @@ namespace KubeSecretFS
 
                 Errno FlushToSecret(byte[] bytes)
                 {
-                    _config.WriteDebug(bytes.Length.ToString());
                     if (i >= _config.MaxSecrets)
                     {
-                        _config.WriteError("unable to write; " +
+                        _logger.Error("unable to write; " +
                                            $"filesystem is larger {_config.MaxBytesPerSecret * _config.MaxSecrets} bytes");
                         return Errno.ENOSPC;
                     }
@@ -196,7 +194,7 @@ namespace KubeSecretFS
 
                     tasks.Add(new Func<Task>(async () =>
                     {
-                        await _kubeClient.CreateNamespacedSecretAsync(secret, _config.SecretNamespace,
+                        await _kubeAccessor.Client.CreateNamespacedSecretAsync(secret, _config.SecretNamespace,
                             cancellationToken: cts.Token);
                         _secretNameGenerationDict.TryAdd(secretName, generation);
                     }).Invoke());
@@ -235,11 +233,10 @@ namespace KubeSecretFS
                 }
 
                 await process.WaitForExitAsync(cts.Token);
-                _config.WriteDebug("tar done");
                 if (process.ExitCode != 0)
                 {
                     var stderr = await process.StandardError.ReadToEndAsync();
-                    _config.WriteError($"tar error: {stderr}");
+                    _logger.Error($"tar error: {stderr}");
                     return Errno.EPROTO;
                 }
 
@@ -261,12 +258,12 @@ namespace KubeSecretFS
 
                 if (_mdSecretExists)
                 {
-                    await _kubeClient.ReplaceNamespacedSecretAsync(mdSecret, _config.SecretBaseName,
+                    await _kubeAccessor.Client.ReplaceNamespacedSecretAsync(mdSecret, _config.SecretBaseName,
                         _config.SecretNamespace, cancellationToken: cts.Token);
                 }
                 else
                 {
-                    await _kubeClient.CreateNamespacedSecretAsync(mdSecret, _config.SecretNamespace,
+                    await _kubeAccessor.Client.CreateNamespacedSecretAsync(mdSecret, _config.SecretNamespace,
                         cancellationToken: cts.Token);
                     _mdSecretExists = true;
                 }
@@ -277,13 +274,14 @@ namespace KubeSecretFS
             }
             catch (Exception e)
             {
-                _config.WriteError(e.Message);
-                _config.WriteDebug(e.StackTrace);
+                _logger.Error(e.Message);
+                _logger.Debug(e.StackTrace);
                 return Errno.ECOMM;
             }
             finally
             {
                 _semaphore.Release();
+                _logger.Debug($"{debugInfo} done");
             }
         }
 
@@ -295,13 +293,18 @@ namespace KubeSecretFS
                 .Select(kvp =>
                     new Func<string, Task>(async (secretName) =>
                     {
-                        await _kubeClient.DeleteNamespacedSecretAsync(secretName, _config.SecretNamespace,
+                        await _kubeAccessor.Client.DeleteNamespacedSecretAsync(secretName, _config.SecretNamespace,
                             cancellationToken: cancellationToken);
                         _secretNameGenerationDict.Remove(secretName, out _);
                     }).Invoke(kvp.Key)
                 ));
 
             await Task.WhenAll(tasks);
+        }
+
+        public void PrepareToStop()
+        {
+            _semaphore.Wait();
         }
     }
 }

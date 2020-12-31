@@ -15,13 +15,11 @@ namespace KubeSecretFS
             Host.CreateDefaultBuilder()
                 .ConfigureServices((_, services) =>
                 {
-                    var kubeClientConfig = KubernetesClientConfiguration.InClusterConfig();
-                    var kubeClient = new Kubernetes(kubeClientConfig);
                     services
                         .AddSingleton<AppConfig>()
+                        .AddSingleton<KubeAccessor>()
                         .AddSingleton<KubeSecretFS>()
-                        .AddSingleton(kubeClientConfig)
-                        .AddSingleton(kubeClient)
+                        .AddSingleton<Logger>()
                         .AddSingleton<Sync>();
                 });
 
@@ -32,7 +30,6 @@ namespace KubeSecretFS
             using var scope = host.Services.CreateScope();
             var config = scope.ServiceProvider.GetRequiredService<AppConfig>();
             var fs = scope.ServiceProvider.GetRequiredService<KubeSecretFS>();
-            var sync = scope.ServiceProvider.GetRequiredService<Sync>();
 
             var unhandled = fs.ParseFuseArguments(args);
             switch (config.ParseArguments(unhandled))
@@ -47,10 +44,12 @@ namespace KubeSecretFS
 
             fs.MountPoint = config.MountPoint;
 
+            var sync = scope.ServiceProvider.GetRequiredService<Sync>();
             await sync.InitAsync();
 
             AppDomain.CurrentDomain.ProcessExit += (_, _) =>
             {
+                sync.PrepareToStop();
                 // ReSharper disable once AccessToDisposedClosure
                 fs.Stop();
             };

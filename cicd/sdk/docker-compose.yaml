@@ -1,4 +1,4 @@
-version: "3.5"
+version: "3.7"
 
 services:
 
@@ -37,6 +37,7 @@ services:
       KUBERNETES_SERVICE_HOST: "${KUBERNETES_SERVICE_HOST:-k3d}"
       KUBERNETES_SERVICE_PORT: "${KUBERNETES_SERVICE_PORT:-6443}"
     working_dir: /app
+    init: true
     command:
       - sh
       - -c
@@ -45,6 +46,7 @@ services:
     volumes:
     - ../../KubeSecretFS.csproj:/app/KubeSecretFS.csproj:ro
     - ../../src:/app/src:ro
+    - ./test:/test:ro
     - kube-sa:/var/run/secrets/kubernetes.io/serviceaccount:ro
 
 volumes:

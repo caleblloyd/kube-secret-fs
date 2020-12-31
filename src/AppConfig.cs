@@ -10,14 +10,12 @@ namespace KubeSecretFS
     public class AppConfig
     {
         public string BaseDir { get; private set; }
-        public bool Debug { get; private set; }
+        public int KubeApiTimeoutSeconds { get; private set; } = 10;
+        public int MaxBytesPerSecret { get; private set; } = 524288;
+        public int MaxSecrets { get; private set; } = 20;
         public string MountPoint { get; private set; }
         public string SecretBaseName { get; private set; }
         public string SecretNamespace { get; private set; }
-
-        public int MaxBytesPerSecret { get; } = 524288;
-        public int MaxSecrets { get; } = 20;
-        public int KubeApiTimeoutSeconds { get; } = 5;
 
         private static readonly string NamespacePath = Path.Combine(
             $"{Path.DirectorySeparatorChar}var",
@@ -26,6 +24,13 @@ namespace KubeSecretFS
             "kubernetes.io",
             "serviceaccount",
             "namespace");
+
+        private readonly Logger _logger;
+
+        public AppConfig(Logger logger)
+        {
+            _logger = logger;
+        }
 
         [SuppressMessage("ReSharper", "AssignmentInConditionalExpression")]
         public ParseResult ParseArguments(IEnumerable<string> args)
@@ -37,14 +42,14 @@ namespace KubeSecretFS
             var optionsSet = new OptionSet
             {
                 {
-                    "debug", "enable debug output                               " +
+                    "debug", "enable debug output\n" +
                              "env var KUBE_SECRET_FS_DEBUG set to '1' or 'true'",
-                    v => Debug = v != null
+                    v => _logger.LogLeveDebug = v != null
                 },
                 {
-                    "baseDir=", "base dir used for filesystem caching             " +
-                                "defaults to <temp dir>/kube-secret-fs            " +
-                                "env var KUBE_SECRET_FS_BASE_DIR                  ",
+                    "baseDir=", "base dir used for filesystem caching\n" +
+                                "defaults to <temp dir>/kube-secret-fs\n" +
+                                "env var KUBE_SECRET_FS_BASE_DIR",
                     v => BaseDir = v
                 },
                 {
@@ -52,15 +57,42 @@ namespace KubeSecretFS
                     v => showHelp = v != null
                 },
                 {
-                    "secretBaseName=", "kubernetes secret base name to store data in  " +
-                                       "env var KUBE_SECRET_FS_SECRET_BASE_NAME       " +
-                                       "defaults to 'kube-secret-fs'",
+                    "kubeApiTimeoutSeconds=", "timeout for calling kubernetes API\n" +
+                                              "defaults to 10s\n" +
+                                              "env var KUBE_SECRET_FS_KUBE_API_TIMEOUT_SECONDS",
+                    v =>
+                    {
+                        if (v != null && int.TryParse(v, out var num)) KubeApiTimeoutSeconds = num;
+                    }
+                },
+                {
+                    "maxBytesPerSecret=", "maximum number of bytes stored in each secret\n" +
+                                          "defaults to 524288 (512 KiB)\n" +
+                                          "env var KUBE_SECRET_FS_MAX_BYTES_PER_SECRET",
+                    v =>
+                    {
+                        if (v != null && int.TryParse(v, out var num)) MaxBytesPerSecret = num;
+                    }
+                },
+                {
+                    "maxSecrets=", "maximum number of secrets to store\n" +
+                                   "defaults to 20\n" +
+                                   "env var KUBE_SECRET_FS_MAX_SECRETS",
+                    v =>
+                    {
+                        if (v != null && int.TryParse(v, out var num)) MaxSecrets = num;
+                    }
+                },
+                {
+                    "secretBaseName=", "kubernetes secret base name to store data in\n" +
+                                       "defaults to kube-secret-fs\n" +
+                                       "env var KUBE_SECRET_FS_SECRET_BASE_NAME",
                     v => SecretBaseName = v
                 },
                 {
-                    "secretNamespace=", "kubernetes secret namespace                   " +
-                                        "env var KUBE_SECRET_FS_SECRET_NAMESPACE       " +
-                                        "defaults to same namespace as pod",
+                    "secretNamespace=", "kubernetes secret namespace\n" +
+                                        "defaults to same namespace as pod\n" +
+                                        "env var KUBE_SECRET_FS_SECRET_NAMESPACE",
                     v => SecretNamespace = v
                 },
             };
@@ -71,7 +103,7 @@ namespace KubeSecretFS
                 if (!extraArg.StartsWith("-") && MountPoint == null)
                     MountPoint = extraArg;
                 else
-                    WriteWarning($"unknown arg: '{extraArg}'");
+                    _logger.Warning($"unknown arg: '{extraArg}'");
             }
 
             if (showHelp)
@@ -81,10 +113,21 @@ namespace KubeSecretFS
             }
 
             // Parse Env Vars
+            int? EnvVarToInt(string name)
+            {
+                return Environment.GetEnvironmentVariable(name) != null
+                       && int.TryParse(Environment.GetEnvironmentVariable(name), out var num)
+                    ? num
+                    : null;
+            }
+
             BaseDir = Environment.GetEnvironmentVariable("KUBE_SECRET_FS_BASE_DIR") ?? BaseDir;
-            Debug = Debug
-                    || Environment.GetEnvironmentVariable("KUBE_SECRET_FS_DEBUG") == "1"
-                    || Environment.GetEnvironmentVariable("KUBE_SECRET_FS_DEBUG") == "true";
+            _logger.LogLeveDebug = _logger.LogLeveDebug
+                                   || Environment.GetEnvironmentVariable("KUBE_SECRET_FS_DEBUG") == "1"
+                                   || Environment.GetEnvironmentVariable("KUBE_SECRET_FS_DEBUG") == "true";
+            KubeApiTimeoutSeconds = EnvVarToInt("KUBE_SECRET_FS_KUBE_API_TIMEOUT_SECONDS") ?? KubeApiTimeoutSeconds;
+            MaxBytesPerSecret = EnvVarToInt("KUBE_SECRET_FS_MAX_BYTES_PER_SECRET") ?? MaxBytesPerSecret;
+            MaxSecrets = EnvVarToInt("KUBE_SECRET_FS_MAX_SECRETS") ?? MaxSecrets;
             MountPoint = Environment.GetEnvironmentVariable("KUBE_SECRET_FS_MOUNT_POINT") ?? MountPoint;
             SecretBaseName = Environment.GetEnvironmentVariable("KUBE_SECRET_FS_SECRET_BASE_NAME") ?? SecretBaseName;
             SecretNamespace = Environment.GetEnvironmentVariable("KUBE_SECRET_FS_SECRET_NAMESPACE") ?? SecretNamespace;
@@ -103,16 +146,22 @@ namespace KubeSecretFS
 
             // Error Checking
             if (error |= MountPoint == null)
-                WriteError("missing mountPoint arg");
+                _logger.Error("missing mountPoint arg");
 
             if (error |= SecretNamespace == null)
-                WriteError("unable to determine default for --secretNamespace; must be set explicitly");
+                _logger.Error("unable to determine default for --secretNamespace; must be set explicitly");
 
-            WriteDebug($"Options:");
-            WriteDebug($"BaseDir: {BaseDir}");
-            WriteDebug($"MountPoint: {MountPoint}");
-            WriteDebug($"SecretBaseName: {SecretBaseName}");
-            WriteDebug($"SecretNamespace: {SecretNamespace}");
+            // Logging
+            _logger.Debug("Args:");
+            _logger.Debug($"MountPoint:            {MountPoint}");
+            _logger.Debug("Options:");
+            _logger.Debug($"BaseDir:               {BaseDir}");
+            _logger.Debug($"MountPoint:            {MountPoint}");
+            _logger.Debug($"KubeApiTimeoutSeconds: {KubeApiTimeoutSeconds}");
+            _logger.Debug($"MaxBytesPerSecret:     {MaxBytesPerSecret}");
+            _logger.Debug($"MaxSecrets:            {MaxSecrets}");
+            _logger.Debug($"SecretBaseName:        {SecretBaseName}");
+            _logger.Debug($"SecretNamespace:       {SecretNamespace}");
 
             return error ? ParseResult.Error : ParseResult.Valid;
         }
@@ -128,24 +177,6 @@ namespace KubeSecretFS
             Console.Error.WriteLine();
             Console.Error.WriteLine("kube-secret-fs options:");
             p.WriteOptionDescriptions(Console.Error);
-        }
-
-        public void WriteError(string message)
-        {
-            Console.Error.WriteLine("kube-secret-fs: error: {0}", message);
-        }
-
-        public void WriteWarning(string message)
-        {
-            Console.Error.WriteLine("kube-secret-fs: warning: {0}", message);
-        }
-
-        public void WriteDebug(string message)
-        {
-            if (Debug)
-            {
-                Console.Error.WriteLine("kube-secret-fs: debug: {0}", message);
-            }
         }
     }
 

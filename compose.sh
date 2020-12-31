@@ -3,7 +3,7 @@
 cd $(dirname $0)
 
 build="false"
-import_images="false"
+logs="false"
 script="$0"
 
 docker_compose() {
@@ -58,6 +58,7 @@ start k3d
 
 options:
         --build          - build new container
+        --logs           - tail logs on dotnet container
     -h, --help           - print this message
 
 EOF
@@ -73,6 +74,9 @@ up() {
                 ;;
             --build)
                 build="true"
+                ;;
+            --logs)
+                logs="true"
                 ;;
             *)
                 up_usage
@@ -169,7 +173,9 @@ up() {
     echo "docker-compose stack has started" >&2
     echo "" >&2
 
-    docker_compose logs -f dotnet
+    if [ "$logs" = "true" ]; then
+      docker_compose logs -f dotnet
+    fi
 }
 
 stop() {
