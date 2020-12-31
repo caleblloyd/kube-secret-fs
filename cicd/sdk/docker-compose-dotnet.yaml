@@ -17,7 +17,6 @@ services:
       KUBERNETES_SERVICE_HOST: "${KUBERNETES_SERVICE_HOST:-k3d}"
       KUBERNETES_SERVICE_PORT: "${KUBERNETES_SERVICE_PORT:-6443}"
     working_dir: /app
-    init: true
     command:
       - sh
       - -c

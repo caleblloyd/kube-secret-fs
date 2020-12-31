@@ -9,7 +9,10 @@ RUN apt update \
     && apt install -y --no-install-recommends \
         fuse \
         libglib2.0-0 \
+        tini \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=kubectl /usr/local/bin/kubectl /usr/local/bin/kubectl
+
+ENTRYPOINT ["tini", "-gv", "--"]

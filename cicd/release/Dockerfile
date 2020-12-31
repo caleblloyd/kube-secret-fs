@@ -5,7 +5,7 @@ COPY /KubeSecretFS.csproj /build/KubeSecretFS.csproj
 WORKDIR /build
 RUN dotnet restore
 
-COPY / /build
+COPY /src /build/src
 RUN dotnet publish -c Release -o /app
 
 # final image
@@ -15,7 +15,8 @@ RUN apt update \
     && apt install -y --no-install-recommends \
         fuse \
         libglib2.0-0 \
+        tini \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=sdk /app /app
-CMD ["/app/KubeSecretFS"]
+ENTRYPOINT ["tini", "-g", "--", "/app/KubeSecretFS"]

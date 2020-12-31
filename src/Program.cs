@@ -57,8 +57,6 @@ namespace KubeSecretFS
             AppDomain.CurrentDomain.ProcessExit += (_, _) =>
             {
                 sync.PrepareToStop();
-                // ReSharper disable once AccessToDisposedClosure
-                fs.Stop();
             };
 
             fs.Start();

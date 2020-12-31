@@ -51,6 +51,9 @@ spec:
           env:
             - name: KUBE_SECRET_FS_MOUNT_POINT
               value: /mnt
+          args:
+            - -o
+            - allow_other
           volumeMounts:
             - name: kube-secret-fs
               mountPath: /mnt

@@ -18,6 +18,10 @@ services:
       KUBERNETES_SERVICE_PORT: "${KUBERNETES_SERVICE_PORT:-6443}"
       KUBE_SECRET_FS_DEBUG: "true"
       KUBE_SECRET_FS_MOUNT_POINT: "/mnt"
+    entrypoint:
+      - tini
+      - -gv
+      - --
     command:
       - sh
       - -c
