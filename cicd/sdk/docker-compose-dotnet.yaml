@@ -25,7 +25,7 @@ services:
         echo "waiting for Service Account token to be written" >&2
         while ! [ -f "/var/run/secrets/kubernetes.io/serviceaccount/token" ]; do sleep 0.1; done
         echo "Service Account token written" >&2
-        exec dotnet watch run -- -o auto_unmount --debug /mnt
+        exec dotnet watch run -- --debug /mnt
     volumes:
     - ../../KubeSecretFS.csproj:/app/KubeSecretFS.csproj:ro
     - ../../src:/app/src:ro

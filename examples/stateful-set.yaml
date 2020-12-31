@@ -1,0 +1,60 @@
+# uses service account from ./rbac.yaml
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nginx
+  labels:
+    app: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  serviceName: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      serviceAccount: kube-secret-fs
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          command:
+            - sh
+            - -c
+            - |
+              echo "waiting for FUSE mount to start" >&2
+              while ! grep -qF 'fuse.KubeSecretFS' /proc/mounts; do sleep 0.1; done
+              echo "FUSE mount started" >&2
+
+              if ! [ -f /usr/share/nginx/html/index.html ]; then
+                echo '<!doctype html>'                                   >  /tmp/index.html
+                echo '<html lang="en">'                                  >> /tmp/index.html
+                echo '<head><title>kubernetes-secret-fs</title></head>'  >> /tmp/index.html
+                echo '<body><h1>Hello kubernetes-secret-fs!</h1></body>' >> /tmp/index.html
+                echo '</html>'                                           >> /tmp/index.html
+                mv /tmp/index.html /usr/share/nginx/html/index.html
+              fi
+
+              exec nginx -g 'daemon off;'
+          volumeMounts:
+            - name: kube-secret-fs
+              mountPath: /usr/share/nginx/html
+              mountPropagation: HostToContainer         
+        - name: ksfs
+          image: boxboat/kube-secret-fs:commit-main
+          imagePullPolicy: Always
+          securityContext:
+            privileged: true    
+          env:
+            - name: KUBE_SECRET_FS_MOUNT_POINT
+              value: /mnt
+          volumeMounts:
+            - name: kube-secret-fs
+              mountPath: /mnt
+              mountPropagation: Bidirectional
+      volumes:
+      - name: kube-secret-fs
+        emptyDir: {}

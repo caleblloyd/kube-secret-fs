@@ -31,7 +31,14 @@ namespace KubeSecretFS
             var config = scope.ServiceProvider.GetRequiredService<AppConfig>();
             var fs = scope.ServiceProvider.GetRequiredService<KubeSecretFS>();
 
-            var unhandled = fs.ParseFuseArguments(args);
+            var fuseArgs = new[]
+                {
+                    "-o",
+                    "auto_unmount"
+                }
+                .Concat(args)
+                .ToArray();
+            var unhandled = fs.ParseFuseArguments(fuseArgs);
             switch (config.ParseArguments(unhandled))
             {
                 case ParseResult.Valid:
