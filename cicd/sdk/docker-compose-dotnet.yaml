@@ -14,8 +14,9 @@ services:
     security_opt:
       - apparmor:unconfined
     environment:
-      KUBERNETES_SERVICE_HOST: "${KUBERNETES_SERVICE_HOST:-k3d}"
-      KUBERNETES_SERVICE_PORT: "${KUBERNETES_SERVICE_PORT:-6443}"
+      KUBERNETES_SERVICE_HOST: k3d
+      KUBERNETES_SERVICE_PORT: "6443"
+      DOTNET_USE_POLLING_FILE_WATCHER: "${DOTNET_USE_POLLING_FILE_WATCHER:-1}"
     working_dir: /app
     command:
       - sh

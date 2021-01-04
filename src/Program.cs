@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using k8s;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,12 +26,15 @@ namespace KubeSecretFS
                 });
 
 
-        public static async Task<int> Main(string[] args)
+        public static async Task Main(string[] args)
         {
             using var host = CreateHostBuilder().Build();
             using var scope = host.Services.CreateScope();
+            var terminateCts = new CancellationTokenSource();
+            var terminateResetEvent = new ManualResetEventSlim();
             var config = scope.ServiceProvider.GetRequiredService<AppConfig>();
             var fs = scope.ServiceProvider.GetRequiredService<KubeSecretFS>();
+            var logger = scope.ServiceProvider.GetRequiredService<Logger>();
 
             var fuseArgs = new[]
                 {
@@ -44,9 +49,11 @@ namespace KubeSecretFS
                 case ParseResult.Valid:
                     break;
                 case ParseResult.Help:
-                    return 0;
+                    Environment.ExitCode = 0;
+                    return;
                 case ParseResult.Error:
-                    return 1;
+                    Environment.ExitCode = 1;
+                    return;
             }
 
             fs.MountPoint = config.MountPoint;
@@ -56,11 +63,16 @@ namespace KubeSecretFS
 
             AppDomain.CurrentDomain.ProcessExit += (_, _) =>
             {
-                sync.PrepareToStop();
+                logger.Debug("setting termination request");
+                terminateCts.Cancel();
+                terminateResetEvent.Wait(CancellationToken.None);
             };
 
-            fs.Start();
-            return 0;
+            var fsTask = Task.Run(() => fs.Start(), CancellationToken.None);
+            await Task.WhenAny(fsTask, sync.WriteLoopAsync(terminateCts.Token));
+            logger.Debug("program exiting with RC 0");
+            Environment.ExitCode = 0;
+            terminateResetEvent.Set();
         }
     }
 }
